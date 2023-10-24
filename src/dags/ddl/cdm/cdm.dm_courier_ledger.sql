@@ -12,3 +12,4 @@ CREATE TABLE cdm.dm_courier_ledger(
     courier_tips_sum numeric(14,2) constraint dm_courier_ledger_courier_tips_sum_check check(courier_tips_sum>-1) not null,
     courier_reward_sum numeric(14,2) constraint dm_courier_ledger_courier_reward_sum_check check(courier_reward_sum>-1) not null
 );
+ALTER TABLE cdm.dm_courier_ledger ADD CONSTRAINT dcl_unique_courier_id_year_month UNIQUE(courier_id,settlement_year,settlement_month);

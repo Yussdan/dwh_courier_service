@@ -1,7 +1,7 @@
 from logging import Logger
 from typing import List
 
-from sprint.stg import EtlSetting, StgEtlSettingsRepository
+from sprint.stg.stg_settings_repository import EtlSetting, StgEtlSettingsRepository
 from sprint import PgConnect
 from sprint.dict_util import json2str
 from psycopg import Connection

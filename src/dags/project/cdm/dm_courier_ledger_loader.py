@@ -7,6 +7,7 @@ import json
 from psycopg import Connection
 from psycopg.rows import class_row
 from pydantic import BaseModel
+from datetime import date
 
 class dsl_obj(BaseModel):
     courier_id : int
@@ -26,7 +27,7 @@ class dsl_originrepository:
     def __init__(self, pg: PgConnect) -> None:
         self._db = pg
 
-    def list_dsl(self, load_dsl_threshold: int,limit:int) -> List[dsl_obj]:
+    def list_dsl(self, pref_month:int, pref_year:int,yesterday:date) -> List[dsl_obj]:
         with self._db.client().cursor(row_factory=class_row(dsl_obj)) as cur:
             cur.execute(
                 """
@@ -100,12 +101,12 @@ class dsl_originrepository:
                         inner join count_order on count_order.mon=dt."month" and count_order.ye=dt."year" 
                         cross join order_sum
                         inner join couriers_rate on couriers_rate.courier_id=dc.id  
-                    where dd.courier_id>%(threshold)s
+                    where dt.month=EXTRACT(MONTH FROM %(yesterday)s::date) and dt.year=EXTRACT(YEAR FROM %(yesterday)s::date) AND (dt.month>%(pref_month)s OR dt.year>%(pref_year)s)
                     order by dd.courier_id
-                    LIMIT %(limit)s; --Обрабатываем только одну пачку объектов.
-                """, {
-                    "threshold": load_dsl_threshold,
-                    "limit": limit
+                """,{
+                    'pref_month':pref_month,
+                    'pref_year':pref_year,
+                    'yesterday':yesterday
                 }
             )
             objs = cur.fetchall()
@@ -139,49 +140,40 @@ class dsl_destRepository:
 
 class dsl_loader:
     WF_KEY = "project_load_dsl_to_cdm_workflow"
-    LAST_LOADED_ID_KEY = "last_loaded_id"
+    LAST_LOADED_MONTH = "last_loaded_month"
+    LAST_LOADED_YEAR = 'last_loaded_year'
 
-    BATCH_LIMIT = 50  # Рангов мало, но мы хотим продемонстрировать инкрементальную загрузку рангов.
-
-    def __init__(self, pg_origin: PgConnect, pg_dest: PgConnect, log: Logger) -> None:
+    def __init__(self,  pg_dest: PgConnect, log: Logger) -> None:
         self.pg_dest = pg_dest
-        self.origin = dsl_originrepository(pg_origin)
-        self.stg = dsl_destRepository()
+        self.dwh = dsl_originrepository(pg_dest)
+        self.cdm = dsl_destRepository()
         self.settings_repository = DdsEtlSettingsRepository()
         self.log = log
 
-    def load_dsl(self):
-        # открываем транзакцию.
-        # Транзакция будет закоммичена, если код в блоке with пройдет успешно (т.е. без ошибок).
-        # Если возникнет ошибка, произойдет откат изменений (rollback транзакции).
+    def load_dsl(self,yesterday):
+
         with self.pg_dest.connection() as conn:
 
-            # Прочитываем состояние загрузки
-            # Если настройки еще нет, заводим ее.
             wf_setting = self.settings_repository.get_setting(conn, self.WF_KEY)
             if not wf_setting:
-                wf_setting = EtlSetting(id=0, workflow_key=self.WF_KEY, workflow_settings={self.LAST_LOADED_ID_KEY: -1})
+                wf_setting = EtlSetting(id=0, workflow_key=self.WF_KEY, workflow_settings={self.LAST_LOADED_MONTH: 1,self.LAST_LOADED_YEAR:2020 })
 
-            # Вычитываем очередную пачку объектов.
-            last_loaded_id = wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY]
-            load_queue = self.origin.list_dsl(last_loaded_id, self.BATCH_LIMIT)
+            last_loaded_month = wf_setting.workflow_settings[self.LAST_LOADED_MONTH]
+            last_loaded_year=wf_setting.workflow_settings[self.LAST_LOADED_YEAR]
+            load_queue = self.dwh.list_dsl(last_loaded_month,last_loaded_year,yesterday)
             self.log.info(f"Found {len(load_queue)} dsl to load.")
             if not load_queue:
                 self.log.info("Quitting.")
                 return
 
-            # Сохраняем объекты в базу dwh.
             for dsl in load_queue:
-                self.stg.insert_dsl(conn, dsl)
-
-            # Сохраняем прогресс.
-            # Мы пользуемся тем же connection, поэтому настройка сохранится вместе с объектами,
-            # либо откатятся все изменения целиком.
+                self.cdm.insert_dsl(conn, dsl)
             
-            wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY] = max([t.courier_id for t in load_queue])
+            wf_setting.workflow_settings[self.LAST_LOADED_MONTH] = ([t.settlement_month for t in load_queue])
+            wf_setting.workflow_settings[self.LAST_LOADED_YEAR] = ([t.settlement_year for t in load_queue])
 
-            wf_setting_json = json.dumps(wf_setting.workflow_settings)  # Преобразуем к строке, чтобы положить в БД.
+            wf_setting_json = json.dumps(wf_setting.workflow_settings) 
             self.settings_repository.save_setting(conn, wf_setting.workflow_key, wf_setting_json)
-            self.log.info(f"Load finished on {wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY]}")
+            self.log.info(f"Load finished on {wf_setting.workflow_settings[self.LAST_LOADED_MONTH],wf_setting.workflow_settings[self.LAST_LOADED_YEAR]}")
 
 

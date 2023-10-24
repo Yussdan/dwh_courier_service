@@ -60,9 +60,9 @@ class dm_couriers_loader:
     LAST_LOADED_ID_KEY = "last_loaded_id"
     BATCH_LIMIT = 50  # Рангов мало, но мы хотим продемонстрировать инкрементальную загрузку рангов.
 
-    def __init__(self, pg_origin: PgConnect, pg_dest: PgConnect, log: Logger) -> None:
+    def __init__(self, pg_dest: PgConnect, log: Logger) -> None:
         self.pg_dest = pg_dest
-        self.origin = dm_couriers_origin_repository(pg_origin)
+        self.dwh = dm_couriers_origin_repository(pg_dest)
         self.stg = dm_couriers_Repository()
         self.settings_repository = DdsEtlSettingsRepository()
         self.log = log
@@ -81,7 +81,7 @@ class dm_couriers_loader:
 
             # Вычитываем очередную пачку объектов.
             last_loaded = wf_setting.workflow_settings[self.LAST_LOADED_ID_KEY]
-            load_queue = self.origin.list_couriers(last_loaded, self.BATCH_LIMIT)
+            load_queue = self.dwh.list_couriers(last_loaded, self.BATCH_LIMIT)
             self.log.info(f"Found {len(load_queue)} couriers to load.")
             if not load_queue:
                 self.log.info("Quitting.")

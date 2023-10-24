@@ -1,7 +1,7 @@
 from datetime import datetime
 from logging import Logger
 
-from sprint.stg import EtlSetting, StgEtlSettingsRepository
+from sprint.stg.stg_settings_repository import EtlSetting, StgEtlSettingsRepository
 from sprint.stg.order_system_orders_dag.pg_saver import PgSaver
 from sprint.stg.order_system_orders_dag.orders_reader import OrdersReader
 from sprint import PgConnect
@@ -10,7 +10,7 @@ from sprint.dict_util import json2str
 
 class OrdersLoader:
     _LOG_THRESHOLD = 2
-    _SESSION_LIMIT = 10
+    _SESSION_LIMIT = 1000
 
     WF_KEY = "sprint_ordersystem_orders_origin_to_stg_workflow"
     LAST_LOADED_TS_KEY = "last_loaded_ts"
